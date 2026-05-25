@@ -85,7 +85,10 @@ extern void suite_servicelink_mqtt(void);
 extern void suite_servicelink_nats(void);
 extern void suite_servicelink_redis_pubsub(void);
 extern void suite_servicelink_trpc(void);
+extern void suite_communities(void);
 extern void suite_endpoint_registry(void);
+extern void suite_endpoint_persistence(void);
+extern void suite_cross_project_links(void);
 
 int main(void) {
     printf("\n  codebase-memory-mcp  C test suite\n");
@@ -219,8 +222,17 @@ int main(void) {
     RUN_SUITE(servicelink_redis_pubsub);
     RUN_SUITE(servicelink_trpc);
 
+    /* Community detection */
+    RUN_SUITE(communities);
+
     /* Cross-repo endpoint registry */
     RUN_SUITE(endpoint_registry);
+
+    /* Endpoint persistence */
+    RUN_SUITE(endpoint_persistence);
+
+    /* Cross-project links */
+    RUN_SUITE(cross_project_links);
 
     /* Release sqlite3 internal caches so ASan doesn't report them as leaks */
     sqlite3_shutdown();

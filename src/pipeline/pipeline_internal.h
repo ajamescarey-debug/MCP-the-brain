@@ -427,6 +427,9 @@ int cbm_pipeline_githistory_apply(cbm_pipeline_ctx_t *ctx, const cbm_githistory_
 
 int cbm_pipeline_pass_servicelinks(cbm_pipeline_ctx_t *ctx);
 
+/* Community detection pass: Louvain clustering on service-link edges. */
+int cbm_pipeline_pass_communities(cbm_pipeline_ctx_t *ctx);
+
 /* Pre-dump pass: decorator tags enrichment (operates on gbuf). */
 int cbm_pipeline_pass_decorator_tags(cbm_gbuf_t *gbuf, const char *project);
 
