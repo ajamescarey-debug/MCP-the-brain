@@ -1,10 +1,12 @@
 #include "../src/foundation/compat.h"
 #include "test_framework.h"
+#include <mcp/mcp.h>
 #include <pipeline/pass_cross_repo.h>
 #include <pipeline/servicelink.h>
 #include <store/store.h>
 #include <sqlite3.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Forward declaration — defined in pass_crossrepolinks.c */
@@ -512,6 +514,91 @@ TEST(cross_link_idempotent_rerun) {
     PASS();
 }
 
+/* MCP reader: after the writer populates per-project CROSS_* edges, the
+ * cross_project_links MCP tool should surface them with full metadata. */
+TEST(mcp_reader_returns_cross_links) {
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/xl-mcp-XXXXXX");
+    if (!cbm_mkdtemp(tmpdir)) { SKIP("cbm_mkdtemp failed"); }
+
+    const ep_fixture_t prod_ep = {
+        "main-api", "kafka", "producer", "user.created",
+        "svc.UserService.publishCreated", "src/svc.ts", NULL
+    };
+    const ep_fixture_t cons_ep = {
+        "consumer-svc", "kafka", "consumer", "user.created",
+        "svc.Listener.onUserCreated", "src/listen.ts", NULL
+    };
+    create_project_db(tmpdir, "main-api", &prod_ep, 1);
+    create_project_db(tmpdir, "consumer-svc", &cons_ep, 1);
+
+    int links = cbm_cross_project_link(tmpdir);
+    ASSERT_EQ(links, 1);
+
+    setenv("CBM_CACHE_DIR", tmpdir, 1);
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char *resp = cbm_mcp_handle_tool(srv, "cross_project_links", "{}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "kafka"));
+    ASSERT_NOT_NULL(strstr(resp, "user.created"));
+    ASSERT_NOT_NULL(strstr(resp, "main-api"));
+    ASSERT_NOT_NULL(strstr(resp, "consumer-svc"));
+    ASSERT_NOT_NULL(strstr(resp, "svc.UserService.publishCreated"));
+    ASSERT_NOT_NULL(strstr(resp, "svc.Listener.onUserCreated"));
+
+    free(resp);
+    cbm_mcp_server_free(srv);
+    unsetenv("CBM_CACHE_DIR");
+    rm_rf(tmpdir);
+    PASS();
+}
+
+/* MCP reader: protocol filter narrows the result. */
+TEST(mcp_reader_filters_by_protocol) {
+    char tmpdir[256];
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/xl-mcp-filter-XXXXXX");
+    if (!cbm_mkdtemp(tmpdir)) { SKIP("cbm_mkdtemp failed"); }
+
+    const ep_fixture_t prod_eps[] = {
+        { "svc-a", "kafka", "producer", "evt.k",
+          "a.kProducer", "src/a.ts", NULL },
+        { "svc-a", "pubsub", "producer", "evt.p",
+          "a.pProducer", "src/a.ts", NULL },
+    };
+    const ep_fixture_t cons_eps[] = {
+        { "svc-b", "kafka", "consumer", "evt.k",
+          "b.kConsumer", "src/b.ts", NULL },
+        { "svc-b", "pubsub", "consumer", "evt.p",
+          "b.pConsumer", "src/b.ts", NULL },
+    };
+    create_project_db(tmpdir, "svc-a", prod_eps, 2);
+    create_project_db(tmpdir, "svc-b", cons_eps, 2);
+
+    int links = cbm_cross_project_link(tmpdir);
+    ASSERT_EQ(links, 2);  /* one kafka match, one pubsub match */
+
+    setenv("CBM_CACHE_DIR", tmpdir, 1);
+    cbm_mcp_server_t *srv = cbm_mcp_server_new(NULL);
+    ASSERT_NOT_NULL(srv);
+
+    char *resp = cbm_mcp_handle_tool(srv, "cross_project_links",
+                                     "{\"protocol\":\"kafka\"}");
+    ASSERT_NOT_NULL(resp);
+    ASSERT_NOT_NULL(strstr(resp, "kafka"));
+    ASSERT_NOT_NULL(strstr(resp, "evt.k"));
+    /* pubsub-only identifier and protocol must not appear */
+    ASSERT_NULL(strstr(resp, "evt.p"));
+    ASSERT_NULL(strstr(resp, "pubsub"));
+
+    free(resp);
+    cbm_mcp_server_free(srv);
+    unsetenv("CBM_CACHE_DIR");
+    rm_rf(tmpdir);
+    PASS();
+}
+
 SUITE(cross_project_links) {
     RUN_TEST(cross_link_exact_match);
     RUN_TEST(cross_link_normalized_match);
@@ -522,4 +609,6 @@ SUITE(cross_project_links) {
     RUN_TEST(cross_link_http_protocol_skipped);
     RUN_TEST(cross_link_unresolved_qn_skipped);
     RUN_TEST(cross_link_idempotent_rerun);
+    RUN_TEST(mcp_reader_returns_cross_links);
+    RUN_TEST(mcp_reader_filters_by_protocol);
 }
