@@ -42,6 +42,33 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* --- BEGIN PORTABILITY SHIM ---
+ *
+ * memmem() is a GNU libc extension that is also present in BSD-derived libcs
+ * (macOS, FreeBSD, OpenBSD, NetBSD, Illumos) and in Cygwin/MSYS2 newlib. It is
+ * NOT declared by MinGW-w64 (any flavor) or MSVC, and is not exported by any
+ * Windows C runtime (neither msvcrt.dll nor ucrtbase.dll). See Gnulib's
+ * portability note for memmem.
+ *
+ * Guard with _WIN32 (defined by every Windows-targeting compiler and only by
+ * them) so the shim is a no-op on every platform whose <string.h> already
+ * declares memmem(). This avoids `static declaration follows non-static
+ * declaration` errors on macOS/BSD where memmem is already in scope.
+ */
+#if defined(_WIN32)
+static inline void *memmem(const void *haystack, size_t hl,
+                           const void *needle, size_t nl) {
+    if (!nl) return (void*)haystack;
+    const unsigned char *h = (const unsigned char*)haystack;
+    const unsigned char *n = (const unsigned char*)needle;
+    for (size_t i = 0; i + nl <= hl; i++)
+        if (h[i] == n[0] && memcmp(h + i, n, nl) == 0)
+            return (void*)(h + i);
+    return NULL;
+}
+#endif
+/* --- END PORTABILITY SHIM --- */
+
 #define KT_EVAL_MAX_DEPTH 32
 #define KT_IMPORT_INITIAL_CAP 16
 
