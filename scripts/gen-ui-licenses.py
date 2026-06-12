@@ -67,9 +67,11 @@ def declared_license(pkg_dir):
 
 def main():
     ui_dir = sys.argv[1]
+    # shell=True so the npm shim resolves on every platform (npm.cmd on
+    # Windows is not found by bare-name exec). Constant command, no injection.
     ls = subprocess.run(
-        ["npm", "ls", "--omit=dev", "--all", "--json"],
-        cwd=ui_dir, capture_output=True, text=True, check=False,
+        "npm ls --omit=dev --all --json",
+        shell=True, cwd=ui_dir, capture_output=True, text=True, check=False,
     )
     tree = json.loads(ls.stdout or "{}")
     pkgs = set()

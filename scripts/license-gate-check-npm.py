@@ -69,8 +69,10 @@ def main():
     ignored_pkgs = set(policy.get("ignored_npm_packages", []))
     skip_tokens = {"and", "or", "with", ""}
 
-    ls = subprocess.run(["npm", "ls", "--omit=dev", "--all", "--json"],
-                        cwd=ui_dir, capture_output=True, text=True, check=False)
+    # shell=True so the npm shim resolves on every platform (npm.cmd on
+    # Windows is not found by bare-name exec). Constant command, no injection.
+    ls = subprocess.run("npm ls --omit=dev --all --json",
+                        shell=True, cwd=ui_dir, capture_output=True, text=True, check=False)
     tree = json.loads(ls.stdout or "{}")
     pkgs = {}
     collect(ui_dir, tree.get("dependencies"), pkgs)
