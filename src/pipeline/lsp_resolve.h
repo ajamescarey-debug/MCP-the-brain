@@ -42,7 +42,9 @@
  *
  * Match rule: the LSP emits CBMResolvedCall entries whose caller_qn
  * matches the call's enclosing function and whose callee_qn ends with
- * the textual callee_name as the last dot-separated segment. The
+ * the textual callee_name as the last dot-separated segment. A qualified
+ * static callee (e.g. Perl `Pkg::sub`) is first reduced to its last
+ * "::"-separated segment so it matches the resolved sub's short name. The
  * pointer returned aliases into `arr` and stays valid as long as the
  * underlying CBMFileResult is alive. */
 static inline const CBMResolvedCall *cbm_pipeline_find_lsp_resolution(
@@ -67,7 +69,18 @@ static inline const CBMResolvedCall *cbm_pipeline_find_lsp_resolution(
         }
         const char *short_name = strrchr(rc->callee_qn, '.');
         short_name = short_name ? short_name + SKIP_ONE : rc->callee_qn;
-        if (strcmp(short_name, call->callee_name) != 0) {
+        /* The structural callee_name for a qualified static call (e.g. Perl's
+         * `Pkg::sub()`) keeps the package prefix, while the resolved callee_qn
+         * short-name is the bare sub. Normalise the textual callee to its last
+         * "::"-separated segment so qualified static calls still match. */
+        const char *call_short = call->callee_name;
+        enum { COLON_SEP_LEN = 2 };
+        const char *sep = strstr(call_short, "::");
+        while (sep) {
+            call_short = sep + COLON_SEP_LEN;
+            sep = strstr(call_short, "::");
+        }
+        if (strcmp(short_name, call_short) != 0) {
             continue;
         }
         if (!best || rc->confidence > best->confidence) {
