@@ -1080,6 +1080,20 @@ TEST(cli_install_same_file_guard_issue472) {
     const char *data = read_test_file(path);
     ASSERT_STR_EQ(data, "must survive self-copy"); /* intact, not zeroed */
 
+#ifndef _WIN32
+    /* Distinct path strings resolving to the same inode (a symlink — exactly
+     * what a non-canonical cbm_detect_self_path vs the hardcoded target can
+     * produce) must also be detected as same-file and skipped, not truncated. */
+    char link[512];
+    snprintf(link, sizeof(link), "%s/self-link", tmpdir);
+    if (symlink(path, link) == 0) {
+        rc = cbm_copy_binary_to_target(link, path);
+        ASSERT_EQ(rc, 0);
+        data = read_test_file(path);
+        ASSERT_STR_EQ(data, "must survive self-copy"); /* still intact via symlink */
+    }
+#endif
+
     test_rmdir_r(tmpdir);
     PASS();
 }
