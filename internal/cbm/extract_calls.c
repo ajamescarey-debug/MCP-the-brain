@@ -355,6 +355,31 @@ static char *extract_swift_callee(CBMArena *a, TSNode node, const char *source, 
     return NULL;
 }
 
+// A Perl sub/method name is an identifier: it starts with a letter or '_',
+// contains only [A-Za-z0-9_] plus the '::' package separator, and is never a
+// string/config literal. tree-sitter-perl mis-parses config lines in .cgi /
+// heredoc-heavy files into call-shaped nodes whose "callee" is a dotted config
+// token (e.g. "log4perl.appender.File.utf8"); rejecting non-identifier text
+// here stops those from becoming bogus CALLS edges. Any '.', whitespace, quote,
+// or '/' disqualifies the token.
+static bool perl_is_identifier_callee(const char *name) {
+    if (!name || !name[0]) {
+        return false;
+    }
+    unsigned char c0 = (unsigned char)name[0];
+    if (!(isalpha(c0) || c0 == '_')) {
+        return false;
+    }
+    for (const char *p = name; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (isalnum(c) || c == '_' || c == ':') {
+            continue;
+        }
+        return false; // '.', space, quote, '/', etc. → not a sub/method name
+    }
+    return true;
+}
+
 // Callee extraction for scripting languages (Elixir, Perl, PHP, Kotlin, MATLAB).
 static char *extract_scripting_callee(CBMArena *a, TSNode node, const char *source,
                                       CBMLanguage lang, const char *nk) {
@@ -367,7 +392,24 @@ static char *extract_scripting_callee(CBMArena *a, TSNode node, const char *sour
         return NULL;
     }
     if (lang == CBM_LANG_PERL && ts_node_child_count(node) > 0) {
-        return cbm_node_text(a, ts_node_child(node, 0), source);
+        // Pull the actual sub/method name token rather than blindly taking
+        // child(0). Grammar (verified against the vendored parser):
+        //   method_call_expression   : field `method`   ($obj->m / Class->m)
+        //   function_call_expression : field `function` (foo(); name with '.'
+        //                              from a config-string misparse lands here)
+        //   ambiguous_function_call_expression : field `function`
+        //   func1op_call_expression  : builtin keyword as child(0) (no field)
+        TSNode name_node = ts_node_child_by_field_name(node, TS_FIELD("method"));
+        if (ts_node_is_null(name_node)) {
+            name_node = ts_node_child_by_field_name(node, TS_FIELD("function"));
+        }
+        if (ts_node_is_null(name_node)) {
+            name_node = ts_node_child(node, 0);
+        }
+        char *pn = cbm_node_text(a, name_node, source);
+        // Reject anything that is not a bare Perl sub/method identifier (config
+        // strings, quoted literals, paths) so no spurious CALLS edge is emitted.
+        return perl_is_identifier_callee(pn) ? pn : NULL;
     }
     if (lang == CBM_LANG_PHP) {
         TSNode func_node = ts_node_child_by_field_name(node, TS_FIELD("function"));
