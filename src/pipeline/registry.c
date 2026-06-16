@@ -356,6 +356,45 @@ static cbm_resolution_t empty_result(void) {
     return r;
 }
 
+/* ── Perl builtin guard (#459 follow-up: call-graph noise) ──────────
+ * Curated subset of perlfunc core builtins. When a Perl CALL resolves
+ * only by the generic short-name matcher (no LSP, no import, after the
+ * same-module/name-lookup chain), a builtin name like `push`/`shift`/
+ * `keys` must NOT be wired to a project sub that merely shares the name
+ * — that is virtually always a false positive. A genuine intra-project
+ * call is resolved by earlier (LSP/textual) stages before this guard.
+ * MUST stay sorted ASCII-ascending for bsearch. */
+static const char *const PERL_BUILTINS[] = {
+    "abs",       "atan2",   "binmode", "bless",     "caller",   "chdir",    "chmod",   "chomp",
+    "chop",      "chown",   "chr",     "chroot",    "close",    "closedir", "cos",     "defined",
+    "delete",    "die",     "do",      "each",      "eof",      "eval",     "exec",    "exists",
+    "exit",      "fork",    "gmtime",  "goto",      "grep",     "hex",      "index",   "int",
+    "join",      "keys",    "last",    "lc",        "lcfirst",  "length",   "local",   "localtime",
+    "log",       "lstat",   "map",     "mkdir",     "my",       "next",     "oct",     "open",
+    "opendir",   "ord",     "our",     "pop",       "pos",      "print",    "printf",  "push",
+    "quotemeta", "rand",    "read",    "readdir",   "readline", "redo",     "ref",     "rename",
+    "require",   "return",  "reverse", "rindex",    "rmdir",    "say",      "scalar",  "seek",
+    "shift",     "sin",     "sleep",   "sort",      "splice",   "split",    "sprintf", "sqrt",
+    "srand",     "stat",    "substr",  "system",    "time",     "uc",       "ucfirst", "undef",
+    "unlink",    "unshift", "values",  "wantarray", "warn",     "write",
+};
+
+static int perl_builtin_cmp(const void *key, const void *elem) {
+    return strcmp((const char *)key, *(const char *const *)elem);
+}
+
+/* True if `name` is one of the curated Perl core builtins. Used to suppress
+ * generic-resolver CALLS edges from Perl builtin invocations to project subs
+ * that happen to share the builtin's name. Perl-scoped: callers gate on the
+ * file language so no other language's resolution is affected. */
+bool cbm_perl_is_builtin(const char *name) {
+    if (!name || !name[0]) {
+        return false;
+    }
+    return bsearch(name, PERL_BUILTINS, sizeof(PERL_BUILTINS) / sizeof(PERL_BUILTINS[0]),
+                   sizeof(PERL_BUILTINS[0]), perl_builtin_cmp) != NULL;
+}
+
 /* ── Lifecycle ──────────────────────────────────────────────────── */
 
 cbm_registry_t *cbm_registry_new(void) {

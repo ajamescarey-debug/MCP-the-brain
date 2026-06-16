@@ -1693,7 +1693,7 @@ static void lsp_idx_free_key(const char *key, void *value, void *ud) {
 /* Resolve calls for one file and emit CALLS/HTTP_CALLS/ASYNC_CALLS edges. */
 static void resolve_file_calls(resolve_ctx_t *rc, resolve_worker_state_t *ws, CBMFileResult *result,
                                const char *rel, const char *module_qn, const char **imp_keys,
-                               const char **imp_vals, int imp_count) {
+                               const char **imp_vals, int imp_count, CBMLanguage lang) {
     /* Build a per-file hash index of resolved_calls keyed by
      * "caller_qn|callee_short" for O(1) lookup. cbm_pipeline_find_lsp_
      * resolution would otherwise do an O(N) linear scan over
@@ -1791,6 +1791,15 @@ static void resolve_file_calls(resolve_ctx_t *rc, resolve_worker_state_t *ws, CB
                 res.candidate_count = 1;
                 ws->lsp_overrides++;
             }
+        } else if (lang == CBM_LANG_PERL && cbm_perl_is_builtin(call->callee_name)) {
+            /* Perl builtin guard (#459 follow-up), mirroring the sequential
+             * pass (pass_calls.c). LSP resolution already declined above
+             * (lsp == NULL here), so suppress the generic short-name match for
+             * Perl builtins (push/shift/keys/...). Leaves res empty → no edge.
+             * Gated to Perl; every other language resolves unchanged. */
+            atomic_fetch_add_explicit(&rc->time_ns_rc_resolve, extract_now_ns() - _rc_t0,
+                                      memory_order_relaxed);
+            continue;
         } else {
             res = cbm_registry_resolve(rc->registry, call->callee_name, module_qn, imp_keys,
                                        imp_vals, imp_count);
@@ -2328,7 +2337,7 @@ static void resolve_worker(int worker_id, void *ctx_ptr) {
 
         /* ── CALLS resolution ──────────────────────────────────── */
         _ph_t0 = extract_now_ns();
-        resolve_file_calls(rc, ws, result, rel, module_qn, imp_keys, imp_vals, imp_count);
+        resolve_file_calls(rc, ws, result, rel, module_qn, imp_keys, imp_vals, imp_count, lang);
         atomic_fetch_add_explicit(&rc->time_ns_calls, extract_now_ns() - _ph_t0,
                                   memory_order_relaxed);
 
