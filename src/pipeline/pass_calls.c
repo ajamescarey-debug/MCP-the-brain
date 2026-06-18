@@ -240,6 +240,24 @@ static int64_t create_svc_route_node(cbm_pipeline_ctx_t *ctx, const char *url, c
     return cbm_gbuf_upsert_node(ctx->gbuf, "Route", url, route_qn, "", 0, 0, rp);
 }
 
+/* Insert an edge, splicing the call-site line (,"line":N) in before the closing
+ * brace when one was captured. Mirrors finalize_and_emit() on the parallel path
+ * so CALLS edges carry their source line regardless of resolution path. Restricted
+ * to CALLS: route/config edge props feed full-only predump passes
+ * (create_route_nodes/create_data_flows), so altering them desyncs full vs
+ * incremental indexing. */
+static void calls_emit_edge(cbm_gbuf_t *gbuf, int64_t src, int64_t tgt, const char *type,
+                            char *props, size_t cap, const CBMCall *call) {
+    if (call && call->start_line > 0 && strcmp(type, "CALLS") == 0) {
+        size_t len = strlen(props);
+        if (len >= SKIP_ONE && props[len - SKIP_ONE] == '}' && len + CBM_SZ_32 < cap) {
+            snprintf(props + len - SKIP_ONE, cap - (len - SKIP_ONE), ",\"line\":%d}",
+                     call->start_line);
+        }
+    }
+    cbm_gbuf_insert_edge(gbuf, src, tgt, type, props);
+}
+
 static void emit_http_async_edge(cbm_pipeline_ctx_t *ctx, const CBMCall *call,
                                  const cbm_gbuf_node_t *source, const cbm_gbuf_node_t *target,
                                  const cbm_resolution_t *res, cbm_svc_kind_t svc) {
@@ -256,7 +274,7 @@ static void emit_http_async_edge(cbm_pipeline_ctx_t *ctx, const CBMCall *call,
                  "{\"callee\":\"%s\",\"confidence\":%.2f,\"strategy\":\"%s\",\"candidates\":%d}",
                  esc_callee, res->confidence, res->strategy ? res->strategy : "unknown",
                  res->candidate_count);
-        cbm_gbuf_insert_edge(ctx->gbuf, source->id, target->id, "CALLS", props);
+        calls_emit_edge(ctx->gbuf, source->id, target->id, "CALLS", props, sizeof(props), call);
         return;
     }
     const char *edge_type = (svc == CBM_SVC_HTTP) ? "HTTP_CALLS" : "ASYNC_CALLS";
@@ -279,7 +297,7 @@ static void emit_http_async_edge(cbm_pipeline_ctx_t *ctx, const CBMCall *call,
             snprintf(props + plen - 1, sizeof(props) - plen + SKIP_ONE, "\"}");
         }
     }
-    cbm_gbuf_insert_edge(ctx->gbuf, source->id, route_id, edge_type, props);
+    calls_emit_edge(ctx->gbuf, source->id, route_id, edge_type, props, sizeof(props), call);
 }
 
 /* Classify a resolved call and emit the appropriate edge. */
@@ -304,7 +322,8 @@ static void emit_classified_edge(cbm_pipeline_ctx_t *ctx, const CBMCall *call,
         char props[CBM_SZ_512];
         snprintf(props, sizeof(props), "{\"callee\":\"%s\",\"key\":\"%s\",\"confidence\":%.2f}",
                  esc_c, esc_k, res->confidence);
-        cbm_gbuf_insert_edge(ctx->gbuf, source->id, target->id, "CONFIGURES", props);
+        calls_emit_edge(ctx->gbuf, source->id, target->id, "CONFIGURES", props, sizeof(props),
+                        call);
         return;
     }
     char esc_c2[CBM_SZ_256];
@@ -314,7 +333,7 @@ static void emit_classified_edge(cbm_pipeline_ctx_t *ctx, const CBMCall *call,
              "{\"callee\":\"%s\",\"confidence\":%.2f,\"strategy\":\"%s\",\"candidates\":%d}",
              esc_c2, res->confidence, res->strategy ? res->strategy : "unknown",
              res->candidate_count);
-    cbm_gbuf_insert_edge(ctx->gbuf, source->id, target->id, "CALLS", props);
+    calls_emit_edge(ctx->gbuf, source->id, target->id, "CALLS", props, sizeof(props), call);
 }
 
 /* Find source node for a call: enclosing function or file node. */
