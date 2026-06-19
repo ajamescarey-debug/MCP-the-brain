@@ -541,15 +541,12 @@ int cbm_discover_ex(const char *repo_path, const cbm_discover_opts_t *opts, cbm_
         return CBM_NOT_FOUND;
     }
 
-    /* Load gitignore if .git directory exists */
+    /* Respect a .gitignore at the indexed path even when the caller points us
+     * at a subdirectory instead of the repository root. */
     cbm_gitignore_t *gitignore = NULL;
     char gi_path[CBM_SZ_4K];
-    snprintf(gi_path, sizeof(gi_path), "%s/.git", repo_path);
-    struct stat gi_stat;
-    if (wide_stat(gi_path, &gi_stat) == 0 && S_ISDIR(gi_stat.st_mode)) {
-        snprintf(gi_path, sizeof(gi_path), "%s/.gitignore", repo_path);
-        gitignore = cbm_gitignore_load(gi_path);
-    }
+    snprintf(gi_path, sizeof(gi_path), "%s/.gitignore", repo_path);
+    gitignore = cbm_gitignore_load(gi_path);
 
     /* Load cbmignore if specified or exists at repo root */
     cbm_gitignore_t *cbmignore = NULL;
