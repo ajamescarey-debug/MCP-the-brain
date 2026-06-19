@@ -22,6 +22,8 @@ enum {
      * -> comma + 2 key quotes + colon + 2 value quotes (resp. brackets). */
     PP_JSON_FIELD_OVERHEAD = 6,
     PP_ARGS_MARGIN = 20,
+    /* ,"line":<int> -> comma + key (7) + colon + up to 10 digits + NUL. */
+    PP_LINE_MARGIN = 24,
     PP_LOG_THRESH = 24,
     PP_LOG_INTERVAL = 10,
     PP_TIMER_THRESH = 1000,
@@ -1181,6 +1183,13 @@ static void finalize_and_emit(cbm_gbuf_t *gbuf, int64_t src_id, int64_t tgt_id,
                               const char *edge_type, char *props, int n, const CBMCall *call) {
     if (n > 0 && (size_t)n < CBM_SZ_2K - PP_ESC_SPACE) {
         size_t pos = append_args_json(props, CBM_SZ_2K, (size_t)n, call);
+        if (call->start_line > 0 && strcmp(edge_type, "CALLS") == 0 &&
+            pos < CBM_SZ_2K - PP_LINE_MARGIN) {
+            int ln = snprintf(props + pos, CBM_SZ_2K - pos, ",\"line\":%d", call->start_line);
+            if (ln > 0) {
+                pos += (size_t)ln;
+            }
+        }
         if (pos < CBM_SZ_2K - SKIP_ONE) {
             props[pos] = '}';
             props[pos + SKIP_ONE] = '\0';
